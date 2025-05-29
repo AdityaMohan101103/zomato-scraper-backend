@@ -1,26 +1,16 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
-import requests
-from bs4 import BeautifulSoup
-import re
+from requests_html import HTMLSession
 import json
+import re
 from html import unescape
 
 app = FastAPI()
 
-# Enhanced headers to mimic a real browser
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Referer": "https://www.zomato.com/",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1"
-}
-
 class ScrapeRequest(BaseModel):
     url: str
+
+session = HTMLSession()
 
 def extract_needed_data(json_data):
     if isinstance(json_data, str):
@@ -50,42 +40,38 @@ def extract_needed_data(json_data):
     return filtered_data, name
 
 @app.get("/")
-async def root():
+def read_root():
     return {"message": "Zomato scraper backend is live!"}
 
 @app.post("/scrape")
-async def scrape_menu(data: ScrapeRequest):
-    url = data.url.strip()
+def scrape_menu(request: ScrapeRequest):
+    url = request.url.strip()
     if not url.endswith('/order'):
         url += '/order'
 
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        raise HTTPException(status_code=400, detail=f"Error fetching page: {e}")
+        response = session.get(url)
+        response.html.render(timeout=20)
+        html = response.html.html
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error rendering page: {str(e)}")
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    match = re.search(r'window\.__PRELOADED_STATE__ = JSON\.parse\((.+?)\);', html)
+    if match:
+        try:
+            escaped_json = match.group(1)
+            decoded_json_str = unescape(escaped_json)
+            parsed_json = json.loads(decoded_json_str)
+            preloaded_state = json.loads(parsed_json)
 
-    scripts = soup.find_all('script')
-    for script in scripts:
-        if 'window.__PRELOADED_STATE__' in script.text:
-            match = re.search(r'window\.__PRELOADED_STATE__ = JSON\.parse\((.+?)\);', script.text)
-            if match:
-                try:
-                    escaped_json = match.group(1)
-                    decoded_json_str = unescape(escaped_json)
-                    parsed_json = json.loads(decoded_json_str)
-                    preloaded_state = json.loads(parsed_json)
+            flat_data, restaurant_name = extract_needed_data(preloaded_state)
 
-                    flat_data, restaurant_name = extract_needed_data(preloaded_state)
-                    return {"restaurant_name": restaurant_name, "menu_items": flat_data}
+            return {
+                "restaurant": restaurant_name,
+                "menu": flat_data
+            }
 
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=f"Error parsing embedded JSON: {e}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error parsing JSON: {str(e)}")
 
     raise HTTPException(status_code=404, detail="No embedded menu data found on this page.")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
