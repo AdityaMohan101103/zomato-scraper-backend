@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from requests_html import HTMLSession
-import asyncio
+from requests_html import AsyncHTMLSession
 
 app = FastAPI()
 
@@ -15,13 +14,12 @@ async def root():
 @app.post("/scrape")
 async def scrape_menu(data: ScrapeRequest):
     try:
-        session = HTMLSession()
-        response = session.get(data.url)
-        asyncio.run(response.html.arender(timeout=20))  # Ensure event loop exists for render
+        session = AsyncHTMLSession()
+        response = await session.get(data.url)
+        await response.html.arender(timeout=20)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error rendering page: {e}")
 
-    # Extract items
     items = response.html.find("div[class^='sc-beySbM']")
     menu_data = []
 
