@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 import requests
 from bs4 import BeautifulSoup
 import re
@@ -13,7 +13,7 @@ headers = {
 }
 
 class ScrapeRequest(BaseModel):
-    url: HttpUrl
+    url: str
 
 def extract_needed_data(json_data):
     if isinstance(json_data, str):
@@ -42,9 +42,13 @@ def extract_needed_data(json_data):
 
     return filtered_data, name
 
+@app.get("/")
+async def root():
+    return {"message": "Zomato scraper backend is live!"}
+
 @app.post("/scrape")
-def scrape_menu(scrape_req: ScrapeRequest):
-    url = scrape_req.url
+async def scrape_menu(data: ScrapeRequest):
+    url = data.url.strip()
     if not url.endswith('/order'):
         url += '/order'
 
@@ -68,10 +72,13 @@ def scrape_menu(scrape_req: ScrapeRequest):
                     preloaded_state = json.loads(parsed_json)
 
                     flat_data, restaurant_name = extract_needed_data(preloaded_state)
-
-                    return {"restaurant": restaurant_name, "menu": flat_data}
+                    return {"restaurant_name": restaurant_name, "menu_items": flat_data}
 
                 except Exception as e:
-                    raise HTTPException(status_code=500, detail=f"Error parsing JSON: {e}")
+                    raise HTTPException(status_code=500, detail=f"Error parsing embedded JSON: {e}")
 
     raise HTTPException(status_code=404, detail="No embedded menu data found on this page.")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
