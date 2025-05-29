@@ -8,8 +8,15 @@ from html import unescape
 
 app = FastAPI()
 
+# Enhanced headers to mimic a real browser
 headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Referer": "https://www.zomato.com/",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1"
 }
 
 class ScrapeRequest(BaseModel):
