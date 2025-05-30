@@ -1,38 +1,55 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from requests_html import AsyncHTMLSession
+from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+import requests
+from bs4 import BeautifulSoup
+import json
 
 app = FastAPI()
 
-class ScrapeRequest(BaseModel):
-    url: str
+# Allow CORS (so frontend can access this backend)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # You can restrict this to your Vercel frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
-async def root():
-    return {"message": "Zomato scraper backend is live!"}
+def root():
+    return {"message": "Zomato Scraper API running."}
 
-@app.post("/scrape")
-async def scrape_menu(data: ScrapeRequest):
+@app.get("/scrape")
+def scrape_menu(url: str = Query(..., description="Full Zomato restaurant URL")):
     try:
-        session = AsyncHTMLSession()
-        response = await session.get(data.url)
-        await response.html.arender(timeout=20)
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = requests.get(url, headers=headers)
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        script_tag = soup.find("script", id="__NEXT_DATA__")
+        if not script_tag:
+            return {"detail": "Could not find __NEXT_DATA__ script in page."}
+
+        data = json.loads(script_tag.string)
+
+        # DEBUG: Uncomment this if you're unsure where the menu data is
+        # return data  # send raw structure to frontend for inspection
+
+        menus = data.get("props", {}).get("pageProps", {}).get("initialState", {}).get("menu", {}).get("menus", [])
+        menu_items = []
+
+        for menu in menus:
+            for section in menu.get("categories", []):
+                for item in section.get("items", []):
+                    name = item.get("name")
+                    price = item.get("price")
+                    if name and price is not None:
+                        menu_items.append({"name": name, "price": price})
+
+        if not menu_items:
+            return {"detail": "No menu items found on the page."}
+
+        return {"menu": menu_items}
+
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error rendering page: {e}")
-
-    items = response.html.find("div[class^='sc-beySbM']")
-    menu_data = []
-
-    for item in items:
-        name_elem = item.find("h4", first=True)
-        price_elem = item.find("span[class*='sc-17hyc2s-1']", first=True)
-        if name_elem and price_elem:
-            menu_data.append({
-                "name": name_elem.text.strip(),
-                "price": price_elem.text.strip()
-            })
-
-    if not menu_data:
-        raise HTTPException(status_code=404, detail="No menu items found on the page.")
-
-    return {"menu": menu_data}
+        return {"detail": f"Error scraping page: {str(e)}"}
