@@ -33,7 +33,7 @@ def scrape_menu(url: str = Query(..., description="Full Zomato restaurant URL"))
         data = json.loads(script_tag.string)
 
         # DEBUG: Uncomment this if you're unsure where the menu data is
-        # return data  # send raw structure to frontend for inspection
+        return data  # send raw structure to frontend for inspection
 
         menus = data.get("props", {}).get("pageProps", {}).get("initialState", {}).get("menu", {}).get("menus", [])
         menu_items = []
