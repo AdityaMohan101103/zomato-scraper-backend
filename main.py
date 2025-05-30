@@ -1,55 +1,50 @@
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-import requests
-from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 import json
 
 app = FastAPI()
 
-# Allow CORS (so frontend can access this backend)
+# Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # You can restrict this to your Vercel frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
-    return {"message": "Zomato Scraper API running."}
-
 @app.get("/scrape")
-def scrape_menu(url: str = Query(..., description="Full Zomato restaurant URL")):
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        res = requests.get(url, headers=headers)
-        soup = BeautifulSoup(res.text, "html.parser")
-
-        script_tag = soup.find("script", id="__NEXT_DATA__")
-        if not script_tag:
+async def scrape_zomato(url: str = Query(..., description="Zomato restaurant URL")):
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto(url, timeout=60000)
+        content = await page.content()
+        
+        # Look for __NEXT_DATA__ in scripts
+        scripts = await page.query_selector_all("script#__NEXT_DATA__")
+        if not scripts:
+            await browser.close()
             return {"detail": "Could not find __NEXT_DATA__ script in page."}
+        
+        json_text = await scripts[0].inner_text()
+        data = json.loads(json_text)
+        await browser.close()
 
-        data = json.loads(script_tag.string)
-
-        # DEBUG: Uncomment this if you're unsure where the menu data is
-        return data  # send raw structure to frontend for inspection
-
-        menus = data.get("props", {}).get("pageProps", {}).get("initialState", {}).get("menu", {}).get("menus", [])
-        menu_items = []
-
-        for menu in menus:
-            for section in menu.get("categories", []):
-                for item in section.get("items", []):
-                    name = item.get("name")
-                    price = item.get("price")
-                    if name and price is not None:
-                        menu_items.append({"name": name, "price": price})
-
-        if not menu_items:
-            return {"detail": "No menu items found on the page."}
-
-        return {"menu": menu_items}
-
-    except Exception as e:
-        return {"detail": f"Error scraping page: {str(e)}"}
+        # Extract menu items
+        try:
+            menu_data = data["props"]["pageProps"]["initialState"]["menu"]["menus"]
+            items = []
+            for menu in menu_data:
+                for section in menu.get("menu", {}).get("categoriesMap", {}).values():
+                    for item in section.get("items", []):
+                        items.append({
+                            "name": item.get("name"),
+                            "price": item.get("price"),
+                        })
+            if not items:
+                return {"detail": "No menu items found in parsed data."}
+            return {"items": items}
+        except KeyError:
+            return {"detail": "Could not extract menu items from __NEXT_DATA__."}
